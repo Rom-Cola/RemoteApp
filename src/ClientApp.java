@@ -10,7 +10,6 @@ public class ClientApp {
 
             Client client = new Client(clientSocket, reader);
 
-            // Викликаємо метод для запуску меню
             client.start();
 
         } catch (Exception e) {

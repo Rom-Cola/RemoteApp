@@ -7,15 +7,14 @@ import java.util.Map;
 
 public class Server {
     private static final int PORT = 12345;
-    private static final String SERVER_IP = "192.168.0.100"; // Ваша IP-адреса сервера
+    private static final String SERVER_IP = "192.168.0.100";
 
-    // Зберігає інформацію про клієнтів: IP та порт
+
     private static Map<String, ClientInfo> clients = new HashMap<>();
     private static DatagramSocket serverSocket;
 
     public static void main(String[] args) {
         try {
-            // Створення DatagramSocket з конкретною IP-адресою та портом
             InetAddress serverAddress = InetAddress.getByName(SERVER_IP);
             serverSocket = new DatagramSocket(PORT, serverAddress);
             System.out.println("Server started at " + SERVER_IP + ":" + PORT + ", waiting for commands...");
@@ -29,46 +28,48 @@ public class Server {
                 String clientMessage = new String(receivePacket.getData(), 0, receivePacket.getLength());
                 String clientKey = receivePacket.getAddress().toString() + ":" + receivePacket.getPort();
 
-                // Зберігаємо клієнта в мапу, якщо він новий
                 if (!clients.containsKey(clientKey)) {
                     clients.put(clientKey, new ClientInfo(receivePacket.getAddress(), receivePacket.getPort()));
                     System.out.println("New client registered: " + clientKey);
+                    DatabaseManager.saveClient(receivePacket.getAddress().toString(), receivePacket.getPort());
                 }
 
                 // Обробка команд
                 if (clientMessage.equals("PING")) {
-                    // Відправити відповідь "PONG"
                     String responseMessage = "PONG";
-                    byte[] sendBuffer = responseMessage.getBytes();
-                    DatagramPacket sendPacket = new DatagramPacket(sendBuffer, sendBuffer.length,
-                            receivePacket.getAddress(), receivePacket.getPort());
-                    serverSocket.send(sendPacket);
+                    sendMessage(receivePacket.getAddress(), receivePacket.getPort(), responseMessage);
                     System.out.println("Sent response: PONG");
                 } else if (clientMessage.startsWith("SEND_TO:")) {
                     String[] parts = clientMessage.split(":");
-                    String targetIP = "/" + parts[1];
+                    String targetIP = parts[1];
                     int targetPort = Integer.parseInt(parts[2]);
                     String command = parts[3];
 
-                    // Шукаємо клієнта для відправки команди
+                    String message = "%s:%s:%d:%s".formatted("EXECUTE", receivePacket.getAddress(), receivePacket.getPort(), command);
                     ClientInfo targetClient = findClient(targetIP, targetPort);
                     if (targetClient != null) {
-                        // Відправляємо команду іншому клієнту
-                        byte[] sendBuffer = command.getBytes();
-                        DatagramPacket sendPacket = new DatagramPacket(
-                                sendBuffer, sendBuffer.length, targetClient.getAddress(), targetClient.getPort());
-                        serverSocket.send(sendPacket);
+                        System.out.println("Sending execute to client: " + targetClient);
+                        sendMessage(targetClient, message);
                     } else {
                         System.out.println("Target client not found.");
                     }
                 } else if (clientMessage.startsWith("RESPONSE_TO:")) {
-                    String[] parts = clientMessage.split(":");
-                    String targetIP = "/" + parts[1];
+                    String[] parts = clientMessage.split(":", 5);
+                    String targetIP = parts[1];
                     int targetPort = Integer.parseInt(parts[2]);
                     String command = parts[3];
+                    String response = parts[4];
+                    ClientInfo targetClient = findClient(targetIP, targetPort);
+                    if (targetClient != null) {
+                        System.out.println("Sending response to client: " + targetClient);
+                        DatabaseManager.saveCommand(receivePacket.getAddress().toString(), receivePacket.getPort(),
+                                targetIP, targetPort, command, response);
+                        sendMessage(targetClient, response);
+                    } else {
+                        System.out.println("Target client not found.");
+                    }
                 } else {
-                    // Якщо це результат виконання команди, просто відображаємо його на сервері
-                    System.out.println("Received result from client: " + clientMessage);
+                    System.out.printf("Command \"%s\" not found\n", clientMessage);
                 }
             }
         } catch (Exception e) {
@@ -77,18 +78,30 @@ public class Server {
     }
 
     private static ClientInfo findClient(String ip, int port) {
-        System.out.printf("Target: %s:%d\n", ip, port);
-        System.out.println("List" + clients);
+        ip = "/" + ip;
         for (String key : clients.keySet()) {
             ClientInfo clientInfo = clients.get(key);
             if (clientInfo.getAddress().toString().equals(ip) && clientInfo.getPort() == port) {
+                System.out.printf("Found: %s:%d\n", clientInfo.getAddress(), clientInfo.getPort());
                 return clientInfo;
             }
         }
         return null;
     }
 
+    private static void sendMessage(ClientInfo clientInfo, String message) throws IOException {
+        byte[] sendBuffer = message.getBytes();
+        DatagramPacket sendPacket = new DatagramPacket(sendBuffer, sendBuffer.length,
+                clientInfo.getAddress(), clientInfo.getPort());
+        serverSocket.send(sendPacket);
+    }
 
+    private static void sendMessage(InetAddress inetAddress, int port, String message) throws IOException {
+        byte[] sendBuffer = message.getBytes();
+        DatagramPacket sendPacket = new DatagramPacket(sendBuffer, sendBuffer.length,
+                inetAddress, port);
+        serverSocket.send(sendPacket);
+    }
 }
 
 class ClientInfo {
@@ -110,9 +123,6 @@ class ClientInfo {
 
     @Override
     public String toString() {
-        return "ClientInfo{" +
-                "address=" + address +
-                ", port=" + port +
-                '}';
+        return "Client:" + address + ":" + port;
     }
 }

@@ -1,12 +1,10 @@
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
-import java.util.ArrayList;
-import java.util.List;
 
 public class Client {
-    private List<Connection> connections = new ArrayList<>();
     private DatagramSocket clientSocket;
     private BufferedReader reader;
     private InetAddress serverAddress;
@@ -25,14 +23,12 @@ public class Client {
                 continue;
             }
             System.out.println("Підключення успішне!");
-            while (true) {
-                menu();
-            }
+            while (menu());
+            break;
         }
     }
 
-    // Метод для відображення меню і обробки вибору користувача
-    private void menu() throws Exception {
+    private boolean menu() throws Exception {
         System.out.println("=== Консольне меню ===");
         System.out.println("1. Підключитись до іншого клієнта");
         System.out.println("2. Надати підключення до свого клієнта");
@@ -48,13 +44,13 @@ public class Client {
                 break;
             case "0":
                 System.out.println("Вихід з програми.");
-                return; // Завершення програми
+                return false;
             default:
                 System.out.println("Невірний вибір, спробуйте ще раз.");
         }
+        return true;
     }
 
-    // Метод для спроби підключення до сервера
     public boolean connectToServer() {
         try {
             String testMessage = "PING";
@@ -64,11 +60,11 @@ public class Client {
 
             byte[] receiveBuffer = new byte[1024];
             DatagramPacket receivePacket = new DatagramPacket(receiveBuffer, receiveBuffer.length);
-            clientSocket.setSoTimeout(5000); // Очікувати відповідь 5 секунд
+            clientSocket.setSoTimeout(5000);
             clientSocket.receive(receivePacket);
 
             String serverResponse = new String(receivePacket.getData(), 0, receivePacket.getLength());
-            return serverResponse.equals("PONG"); // Перевірка на правильну відповідь від сервера
+            return serverResponse.equals("PONG");
 
         } catch (Exception e) {
             System.out.println("Не вдалося підключитися до сервера.");
@@ -76,54 +72,69 @@ public class Client {
         }
     }
 
-    // Метод для підключення до іншого клієнта
     public void connectToAnotherClient() throws Exception {
         System.out.println("Введіть IP клієнта для підключення:");
         String targetIP = reader.readLine();
         System.out.println("Введіть порт клієнта:");
         int targetPort = Integer.parseInt(reader.readLine());
-        System.out.println("Введіть команду для виконання:");
-        String command = reader.readLine();
+        while (true) {
+            System.out.println("Введіть команду для виконання (0 to exit):");
+            String command = reader.readLine();
+            if (command.equals("0")) {
+                break;
+            }
+            sendCommandToAnotherClient(targetIP, targetPort, command);
+            try {
+                String serverResponse = receiveMessageFromServer();
+                System.out.println("Результат виконання команди: " + serverResponse);
+            } catch (IOException e) {
+                System.out.println("Відповідь не прийшла, перевірте підключення та повторіть спробу");
+            }
 
-        String message = "SEND_TO:" + targetIP + ":" + targetPort + ":" + command;
-        sendMessageToServer(message);
-
-        String serverResponse = receiveMessageFromServer();
-        System.out.println("Результат виконання команди: " + serverResponse);
+        }
     }
 
-    // Метод для надання підключення до свого клієнта
     public void allowConnectionToYourClient() throws Exception {
         System.out.println("Очікування підключень...");
-        clientSocket.setSoTimeout(0);
 
         while (true) {
-            String clientMessage = receiveMessageFromServer();
+            String clientMessage;
+            try {
+                clientMessage = receiveMessageFromServer();
+            } catch (IOException e) {
+                System.out.println("Очікування підключень...");
+                continue;
+            }
             if (clientMessage.startsWith("EXECUTE")) {
                 String[] parts = clientMessage.split(":");
-                String senderIP = "/" + parts[1];
+                String senderIP = parts[1].substring(1);
                 int senderPort = Integer.parseInt(parts[2]);
                 String command = parts[3];
 
                 System.out.printf("Отримана команда від %s:%d : %s\n", senderIP, senderPort, command);
 
-                String result = CommandExecutor.executeCommand(clientMessage);
-                sendMessageToServer("RESPONSE_TO:%s:%d:%s".formatted(senderIP, senderPort, result));
+                String result = CommandExecutor.executeCommand(command);
+                System.out.println(result);
+                sendMessageToServer("RESPONSE_TO:%s:%d:%s:%s".formatted(senderIP, senderPort, command, result));
             }
         }
     }
 
-    // Метод для відправки повідомлення на сервер
-    private void sendMessageToServer(String message) throws Exception {
+    private void sendCommandToAnotherClient(String targetIp, int targetPort, String command) throws IOException {
+        String message = "SEND_TO:" + targetIp + ":" + targetPort + ":" + command;
+        sendMessageToServer(message);
+    }
+
+    private void sendMessageToServer(String message) throws IOException {
         byte[] sendBuffer = message.getBytes();
         DatagramPacket sendPacket = new DatagramPacket(sendBuffer, sendBuffer.length, serverAddress, serverPort);
         clientSocket.send(sendPacket);
     }
 
-    // Метод для отримання повідомлення від сервера
-    private String receiveMessageFromServer() throws Exception {
+    private String receiveMessageFromServer() throws IOException {
         byte[] receiveBuffer = new byte[1024];
         DatagramPacket receivePacket = new DatagramPacket(receiveBuffer, receiveBuffer.length);
+        clientSocket.setSoTimeout(10_000);
         clientSocket.receive(receivePacket);
         return new String(receivePacket.getData(), 0, receivePacket.getLength());
     }
