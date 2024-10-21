@@ -3,6 +3,7 @@ import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class Client {
     private DatagramSocket clientSocket;
@@ -95,27 +96,40 @@ public class Client {
     }
 
     public void allowConnectionToYourClient() throws Exception {
-        System.out.println("Очікування підключень...");
+        Thread listenerThread = new Thread(() -> {
+            System.out.println("Очікування підключень...");
+            while (!Thread.currentThread().isInterrupted()) {
+                try {
+                    String clientMessage = receiveMessageFromServer();
+                    if (clientMessage.startsWith("EXECUTE")) {
+                        String[] parts = clientMessage.split(":");
+                        String senderIP = parts[1].substring(1);
+                        int senderPort = Integer.parseInt(parts[2]);
+                        String command = parts[3];
 
-        while (true) {
-            String clientMessage;
-            try {
-                clientMessage = receiveMessageFromServer();
-            } catch (IOException e) {
-                System.out.println("Очікування підключень...");
-                continue;
+                        System.out.printf("Отримана команда від %s:%d : %s\n", senderIP, senderPort, command);
+
+                        String result = CommandExecutor.executeCommand(command);
+                        System.out.println(result);
+                        sendMessageToServer("RESPONSE_TO:%s:%d:%s:%s".formatted(senderIP, senderPort, command, result));
+                    }
+                } catch (IOException e) {
+                    System.out.println("Очікування підключень...");
+                }
             }
-            if (clientMessage.startsWith("EXECUTE")) {
-                String[] parts = clientMessage.split(":");
-                String senderIP = parts[1].substring(1);
-                int senderPort = Integer.parseInt(parts[2]);
-                String command = parts[3];
+        });
 
-                System.out.printf("Отримана команда від %s:%d : %s\n", senderIP, senderPort, command);
+        listenerThread.start();
 
-                String result = CommandExecutor.executeCommand(command);
-                System.out.println(result);
-                sendMessageToServer("RESPONSE_TO:%s:%d:%s:%s".formatted(senderIP, senderPort, command, result));
+        // В основному потоці продовжуємо читати команди
+        while (true) {
+            System.out.println("Введіть 'exit' для завершення очікування підключень:");
+            String input = reader.readLine();
+            if (input.equalsIgnoreCase("exit")) {
+                listenerThread.interrupt();
+                listenerThread.join();
+                System.out.println("Очікування підключень завершено.");
+                break;
             }
         }
     }

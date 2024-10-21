@@ -31,7 +31,7 @@ public class Server {
                 if (!clients.containsKey(clientKey)) {
                     clients.put(clientKey, new ClientInfo(receivePacket.getAddress(), receivePacket.getPort()));
                     System.out.println("New client registered: " + clientKey);
-                    DatabaseManager.saveClient(receivePacket.getAddress().toString(), receivePacket.getPort());
+                    DatabaseManager.saveClient(receivePacket.getAddress().toString().substring(1), receivePacket.getPort());
                 }
 
                 // Обробка команд
@@ -62,7 +62,7 @@ public class Server {
                     ClientInfo targetClient = findClient(targetIP, targetPort);
                     if (targetClient != null) {
                         System.out.println("Sending response to client: " + targetClient);
-                        DatabaseManager.saveCommand(receivePacket.getAddress().toString(), receivePacket.getPort(),
+                        DatabaseManager.saveCommand(receivePacket.getAddress().toString().substring(1), receivePacket.getPort(),
                                 targetIP, targetPort, command, response);
                         sendMessage(targetClient, response);
                     } else {
