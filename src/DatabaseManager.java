@@ -1,7 +1,5 @@
+import java.sql.*;
 import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.PreparedStatement;
-import java.sql.SQLException;
 
 public class DatabaseManager {
     private static final String URL = "jdbc:postgresql://localhost:5432/RemoteApp";
@@ -28,6 +26,7 @@ public class DatabaseManager {
         }
     }
 
+
     public static void saveCommand(String senderIp, int senderPort, String receiverIp, int receiverPort, String command, String result) throws SQLException {
         String query = "INSERT INTO commands (sender_ip, sender_port, receiver_ip, receiver_port, command, result) VALUES (?, ?, ?, ?, ?, ?)";
         try (PreparedStatement statement = connection.prepareStatement(query)) {
@@ -40,4 +39,33 @@ public class DatabaseManager {
             statement.executeUpdate();
         }
     }
+    public static boolean isValidUser(String login, String password) {
+        String query = "SELECT COUNT(*) FROM users WHERE login = ? AND password = ?";
+        try (PreparedStatement statement = connection.prepareStatement(query)) {
+            statement.setString(1, login);
+            statement.setString(2, password);
+            ResultSet rs = statement.executeQuery();
+            if (rs.next()) {
+                return rs.getInt(1) > 0;
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return false;
+    }
+
+    public static boolean registerUser(String login, String password) {
+        String query = "INSERT INTO users (login, password) VALUES (?, ?)";
+        try (PreparedStatement statement = connection.prepareStatement(query)) {
+            statement.setString(1, login);
+            statement.setString(2, password);
+            statement.executeUpdate();
+            return true;
+        } catch (SQLException e) {
+            System.err.println("Attempt to register an existing login");
+            return false;
+        }
+    }
+
+
 }

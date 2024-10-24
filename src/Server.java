@@ -68,7 +68,28 @@ public class Server {
                     } else {
                         System.out.println("Target client not found.");
                     }
-                } else {
+                } else if (clientMessage.startsWith("LOGIN:")) {
+                    String[] parts = clientMessage.split(":");
+                    String login = parts[1];
+                    String password = parts[2];
+
+                    if (DatabaseManager.isValidUser(login, password)) {
+                        sendMessage(receivePacket.getAddress(), receivePacket.getPort(), "LOGIN_SUCCESS");
+                    } else {
+                        sendMessage(receivePacket.getAddress(), receivePacket.getPort(), "LOGIN_FAILED");
+                    }
+                } else if (clientMessage.startsWith("REGISTER:")) {
+                    String[] parts = clientMessage.split(":");
+                    String login = parts[1];
+                    String password = parts[2];
+
+                    if (DatabaseManager.registerUser(login, password)) {
+                        sendMessage(receivePacket.getAddress(), receivePacket.getPort(), "REGISTER_SUCCESS");
+                    } else {
+                        sendMessage(receivePacket.getAddress(), receivePacket.getPort(), "REGISTER_FAILED");
+                    }
+                }
+                else {
                     System.out.printf("Command \"%s\" not found\n", clientMessage);
                 }
             }

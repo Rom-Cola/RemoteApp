@@ -10,6 +10,7 @@ public class Client {
     private BufferedReader reader;
     private InetAddress serverAddress;
     private int serverPort = 12345;
+    private String login;
 
     public Client(DatagramSocket clientSocket, BufferedReader reader) throws Exception {
         this.clientSocket = clientSocket;
@@ -30,12 +31,45 @@ public class Client {
     }
 
     private boolean menu() throws Exception {
+        String choice;
+        boolean isAuth = false;
+        while (!isAuth) {
+            System.out.println("=== Консольне меню ===");
+
+            System.out.println("1. Логін");
+            System.out.println("2. Реєстрація");
+            System.out.println("0. Вийти");
+
+            choice = reader.readLine();
+            switch (choice) {
+                case "1":
+                    if (!login()) {
+                        continue;
+                    }
+                    isAuth = true;
+                    break;
+                case "2":
+                    if (!register()) {
+                        continue;
+                    }
+                    isAuth = true;
+                    break;
+                case "0":
+                    System.out.println("Вихід з програми.");
+                    return false;
+                default:
+                    System.out.println("Невірний вибір, спробуйте ще раз.");
+            }
+        }
+
+
         System.out.println("=== Консольне меню ===");
+
         System.out.println("1. Підключитись до іншого клієнта");
         System.out.println("2. Надати підключення до свого клієнта");
         System.out.println("0. Вийти");
 
-        String choice = reader.readLine();
+        choice = reader.readLine();
         switch (choice) {
             case "1":
                 connectToAnotherClient();
@@ -72,6 +106,59 @@ public class Client {
             return false;
         }
     }
+
+    public boolean login() throws IOException {
+        System.out.println("Введіть логін:");
+        String login = reader.readLine();
+
+        System.out.println("Введіть пароль:");
+        String password = reader.readLine();
+
+        String credentials = "LOGIN:" + login + ":" + password;
+        sendMessageToServer(credentials);
+
+        try {
+            String serverResponse = receiveMessageFromServer();
+            if (serverResponse.equals("LOGIN_SUCCESS")) {
+                System.out.println("Авторизація успішна.");
+                this.login = login;
+                return true;
+            } else {
+                System.out.println("Авторизація не вдалася.");
+                return false;
+            }
+        } catch (IOException e) {
+            System.out.println("Помилка підключення.");
+            return false;
+        }
+    }
+
+    public boolean register() throws IOException {
+        System.out.println("Введіть новий логін:");
+        String login = reader.readLine();
+
+        System.out.println("Введіть новий пароль:");
+        String password = reader.readLine();
+
+        String credentials = "REGISTER:" + login + ":" + password;
+        sendMessageToServer(credentials);
+
+        try {
+            String serverResponse = receiveMessageFromServer();
+            if (serverResponse.equals("REGISTER_SUCCESS")) {
+                System.out.println("Реєстрація успішна.");
+                this.login = login;
+                return true;
+            } else {
+                System.out.println("Реєстрація не вдалася. Можливо, такий логін вже існує.");
+                return false;
+            }
+        } catch (IOException e) {
+            System.out.println("Помилка підключення.");
+            return false;
+        }
+    }
+
 
     public void connectToAnotherClient() throws Exception {
         System.out.println("Введіть IP клієнта для підключення:");
