@@ -75,6 +75,15 @@ public class Server {
                 }
                 break;
 
+            case "REGISTER":
+                // Обробка запиту на реєстрацію
+                if (DatabaseManager.registerUser(message.getMessage(), message.getSecondMessage())) {
+                    sendMessage(receivePacket.getAddress(), receivePacket.getPort(), gson.toJson(new Message("REGISTER_SUCCESS")));
+                } else {
+                    sendMessage(receivePacket.getAddress(), receivePacket.getPort(), gson.toJson(new Message("REGISTER_FAILED")));
+                }
+                break;
+
             case "PING":
                 // Відповідь на PING-запит
                 sendMessage(receivePacket.getAddress(), receivePacket.getPort(),
@@ -127,7 +136,7 @@ public class Server {
 
             case "CONNECT_DENIED":
                 // Обробка повідомлення про відхилення запиту на підключення
-                String denyTargetIP = message.getTargetIP();
+                String denyTargetIP = message.getTargetIP().substring(1);
                 int denyTargetPort = message.getTargetPort();
                 String denyMessage = gson.toJson(new Message("CONNECT_DENIED",
                         receivePacket.getAddress().toString(),

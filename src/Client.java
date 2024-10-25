@@ -181,7 +181,8 @@ public class Client {
         try {
             // Отримуємо повідомлення та перевіряємо
             String serverResponse = receiveMessageFromServer(10000);
-            if (serverResponse.equals("REGISTER_SUCCESS")) {
+            Message receivedMessage = gson.fromJson(serverResponse, Message.class);
+            if (receivedMessage.getType().equals("REGISTER_SUCCESS")) {
                 System.out.println("Реєстрація успішна.");
                 this.login = login;
                 return true;
