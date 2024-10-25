@@ -2,38 +2,42 @@ import com.google.gson.Gson;
 
 import java.io.BufferedReader;
 import java.io.IOException;
-import java.net.DatagramPacket;
-import java.net.DatagramSocket;
-import java.net.InetAddress;
-import java.net.SocketException;
+import java.io.InputStreamReader;
+import java.net.*;
 
 public class Client {
-    private DatagramSocket clientSocket;
-    private BufferedReader reader;
-    private InetAddress serverAddress;
-    private int serverPort = 12345;
-    private Gson gson = new Gson();
+    private final DatagramSocket clientSocket;
+    private final BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
+    private final InetAddress serverAddress;
+    private final int serverPort;
+    private final Gson gson = new Gson();
     private String login;
 
-    public Client(DatagramSocket clientSocket, BufferedReader reader) throws Exception {
-        this.clientSocket = clientSocket;
-        this.reader = reader;
-        this.serverAddress = InetAddress.getByName("192.168.0.100");
+    { // Ініціалізатор для налаштування адреси сервера і створення сокета
+        try {
+            serverAddress = InetAddress.getByName("192.168.0.100");
+            serverPort = 12345;
+            clientSocket = new DatagramSocket();
+        } catch (UnknownHostException e) {
+            throw new RuntimeException(e);
+        } catch (SocketException e) {
+            throw new RuntimeException(e);
+        }
     }
 
-    public void start() throws Exception {
+    public void start(){ // Основний метод для старту клієнта та спроби підключення до сервера
         while (true) {
             System.out.println("Спроба підключитись до серверу...");
-            if (!connectToServer()) {
+            if (!connectToServer()) {// Викликає метод для підключення
                 continue;
             }
             System.out.println("Підключення успішне!");
-            menu();
+            menu(); // Запуск меню після успішного підключення
             break;
         }
     }
 
-    private void menu() {
+    private void menu() {   // Головне меню для користувача з авторизацією
         String choice;
         boolean isAuth = false;
         while (!isAuth) {
@@ -49,7 +53,7 @@ public class Client {
                 System.err.println("Не вийшло прочитати вхідні дані від користувача");
                 throw new RuntimeException(e);
             }
-            switch (choice) {
+            switch (choice) { // Виклик методів логіна та реєстрації, а також вихід
                 case "1":
                     if (!login()) {
                         continue;
@@ -70,7 +74,7 @@ public class Client {
             }
 
             boolean exitStatus = false;
-            while (!exitStatus) {
+            while (!exitStatus) { // Підменю з опціями для підключення до інших клієнтів або надання підключення
                 System.out.println("=== Консольне меню ===");
 
                 System.out.println("1. Підключитись до іншого клієнта");
@@ -85,10 +89,10 @@ public class Client {
                 }
                 switch (choice) {
                     case "1":
-                        connectToAnotherClient();
+                        connectToAnotherClient(); // Підключення до іншого клієнта
                         break;
                     case "2":
-                        allowConnectionToYourClient();
+                        allowConnectionToYourClient(); // Відкриття свого клієнта для підключення з інших
                         break;
                     case "0":
                         exitStatus = true;
@@ -102,21 +106,16 @@ public class Client {
         }
     }
 
-    private boolean connectToServer() {
+    private boolean connectToServer() { // Метод для підключення до сервера через надсилання повідомлення "PING"
         try {
+            // Формуємо та надсилаємо PING повідомлення
             Message testMessage = new Message("PING");
-            String jsonMessage = gson.toJson(testMessage);
-            byte[] sendBuffer = jsonMessage.getBytes();
-            DatagramPacket sendPacket = new DatagramPacket(sendBuffer, sendBuffer.length, serverAddress, serverPort);
-            clientSocket.send(sendPacket);
+            sendMessageToServer(testMessage);
 
-            byte[] receiveBuffer = new byte[1024];
-            DatagramPacket receivePacket = new DatagramPacket(receiveBuffer, receiveBuffer.length);
-            clientSocket.setSoTimeout(5000);
-            clientSocket.receive(receivePacket);
+            // Чекаємо на відповідь
+            Message responseMessage = gson.fromJson(receiveMessageFromServer(5000), Message.class);
 
-            String serverResponse = new String(receivePacket.getData(), 0, receivePacket.getLength());
-            Message responseMessage = gson.fromJson(serverResponse, Message.class);
+            // Після отримання перевіряємо та повертаємо значення
             return responseMessage.getType().equals("PONG");
 
         } catch (Exception e) {
@@ -125,7 +124,8 @@ public class Client {
         }
     }
 
-    private boolean login() {
+    private boolean login() { // Логін користувача: введення логіна і пароля, відправлення на сервер, отримання відповіді
+
         String login;
         String password;
         try {
@@ -138,10 +138,12 @@ public class Client {
             throw new RuntimeException(e);
         }
 
+        // Формуємо та відправляємо повідомлення на спробу авторизації
         Message credentials = new Message("LOGIN", login, password);
         sendMessageToServer(credentials);
 
         try {
+            // Отримуємо повідомлення та перевіряємо
             String serverResponse = receiveMessageFromServer(10000);
             Message responseMessage = gson.fromJson(serverResponse, Message.class);
             if (responseMessage.getType().equals("LOGIN_SUCCESS")) {
@@ -158,7 +160,7 @@ public class Client {
         }
     }
 
-    private boolean register() {
+    private boolean register() { // Реєстрація нового користувача: введення логіна і пароля, відправлення на сервер, отримання відповіді
 
         String login;
         String password;
@@ -172,11 +174,12 @@ public class Client {
             throw new RuntimeException(e);
         }
 
-
+        // Формуємо та надсилаємо повідомлення для спроби реєстрації
         Message message = new Message("REGISTER", login, password);
         sendMessageToServer(message);
 
         try {
+            // Отримуємо повідомлення та перевіряємо
             String serverResponse = receiveMessageFromServer(10000);
             if (serverResponse.equals("REGISTER_SUCCESS")) {
                 System.out.println("Реєстрація успішна.");
@@ -193,7 +196,7 @@ public class Client {
     }
 
 
-    private void connectToAnotherClient(){
+    private void connectToAnotherClient(){  // Метод для запиту підключення до іншого клієнта
         String targetIP;
         int targetPort;
         try {
@@ -206,11 +209,13 @@ public class Client {
             throw new RuntimeException(e);
         }
 
+        // Надсилаємо запит на підключення до іншого клієнта
         Message message = new Message("CONNECT_REQUEST", targetIP, targetPort, login, null);
         sendMessageToServer(message);
 
         System.out.println("Чекаємо дозволу на підключення (30 секунд)");
         try {
+            // Отримуємо відповідь та перевіряємо
             String serverResponse = receiveMessageFromServer(30_000);
             Message receivedMessage = gson.fromJson(serverResponse, Message.class);
 
@@ -221,13 +226,14 @@ public class Client {
                 System.out.println("Підключення підтверджено. Тепер ви можете надсилати команди.");
             } else if (receivedMessage.getType().equals("NO_SUCH_USER")) {
                 System.out.println("Такого клієнту немає в системі");
+                return;
             }
         } catch (IOException e) {
             System.err.println("Не вдалося отримати відповідь на запит підключення.");
             return;
         }
 
-
+        // Введення команд після підтвердження підключення
         while (true) {
             String command;
             try {
@@ -240,9 +246,11 @@ public class Client {
             if (command.equals("0")) {
                 break;
             }
+            // Формуємо повідомлення для виконання нашої команди іншим клієнтом
             Message executeMessage = new Message("SEND_TO", targetIP, targetPort, null, command);
             sendMessageToServer(executeMessage);
             try {
+                // Очікуємо результат, та при отриманні виводимо у консоль
                 String serverResponse = receiveMessageFromServer(10000);
                 System.out.println("Результат виконання команди: " + serverResponse);
             } catch (IOException e) {
@@ -252,47 +260,40 @@ public class Client {
     }
 
 
-    private void allowConnectionToYourClient() {
-        Thread listenerThread = new Thread(() -> {
-            System.out.println("Очікування запитів на підключення...");
-            while (!Thread.currentThread().isInterrupted()) {
-                try {
-                    String messageString = receiveMessageFromServer(10000);
-                    Message message = gson.fromJson(messageString, Message.class);
-                    if (message.getType().equals("CONNECT_REQUEST")) {
-                        String senderIP = message.getTargetIP();
-                        int senderPort = message.getTargetPort();
-                        String senderLogin = message.getSenderLogin();
+    private void allowConnectionToYourClient() {  // Надання дозволу на підключення до свого клієнта іншому користувачеві
+         // Очікування на підключення
+        System.out.println("Очікування запитів на підключення...");
+        while (!Thread.currentThread().isInterrupted()) {
+            try {
+                // Очікуємо запитів на відключення
+                String messageString = receiveMessageFromServer(10000);
+                Message message = gson.fromJson(messageString, Message.class);
+                if (message.getType().equals("CONNECT_REQUEST")) { // Якщо прийшло повідомлення з запитом на підлючення - перевіряємо
+                    String senderIP = message.getTargetIP();
+                    int senderPort = message.getTargetPort();
+                    String senderLogin = message.getSenderLogin();
 
-                        System.out.printf("Клієнт %s хоче підключитися. Підтвердити підключення? (yes/no)\n", senderLogin);
-                        String userResponse = reader.readLine();
-                        if (userResponse.equals("yes")) {
-                            message = new Message("CONNECT_ACCEPTED", senderIP, senderPort);
-                            sendMessageToServer(message);
-                            System.out.println("Підключення підтверджено для клієнта " + senderLogin);
-                            executeFromClient(senderIP.substring(1), senderPort);
-                        } else {
-                            message = new Message("CONNECT_DENIED", senderIP, senderPort);
-                            sendMessageToServer(message);
-                            System.out.printf("Підключення відхилено для клієнта %s\n", senderLogin);
-                        }
+                    System.out.printf("Клієнт %s хоче підключитися. Підтвердити підключення? (yes/no)\n", senderLogin);
+                    String userResponse = reader.readLine();
+                    if (userResponse.equals("yes")) { // Якщо користувач підтверджує доступ то відсилаємо відповідне повідомлення
+                        message = new Message("CONNECT_ACCEPTED", senderIP, senderPort);
+                        sendMessageToServer(message);
+                        System.out.println("Підключення підтверджено для клієнта " + senderLogin);
+                        executeFromClient(senderIP.substring(1), senderPort);
+                    } else {
+                        message = new Message("CONNECT_DENIED", senderIP, senderPort);
+                        sendMessageToServer(message);
+                        System.out.printf("Підключення відхилено для клієнта %s\n", senderLogin);
                     }
-                } catch (IOException e) {
-                    System.out.println("Очікування запитів на підключення...");
                 }
+            } catch (IOException e) {
+                System.out.println("Очікування запитів на підключення...");
             }
-        });
-
-        listenerThread.start();
-        try {
-            listenerThread.join();
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
         }
     }
 
-    private void executeFromClient(String clientIP, int clientPort){
-        while (!Thread.currentThread().isInterrupted()) {
+    private void executeFromClient(String clientIP, int clientPort){ // Виконання команди заданої від іншого клієнта та відповідь
+        while (true) { // Слухаємо вхідні команди, перевіряємо чи це дозволений клієнт та виконуємо
             String messageString = null;
             try {
                 messageString = receiveMessageFromServer(0);
@@ -321,7 +322,7 @@ public class Client {
 
 
 
-    private void sendMessageToServer(Message message) {
+    private void sendMessageToServer(Message message) { // Відправка повідомлення на сервер у форматі JSON
         try {
             String jsonMessage = gson.toJson(message);
             byte[] sendBuffer = jsonMessage.getBytes();
@@ -333,7 +334,7 @@ public class Client {
 
     }
 
-    private void sendMessageToServer(String message) {
+    private void sendMessageToServer(String message) { // Відправка повідомлення на сервер у форматі String
         try {
             byte[] sendBuffer = message.getBytes();
             DatagramPacket sendPacket = new DatagramPacket(sendBuffer, sendBuffer.length, serverAddress, serverPort);
@@ -345,8 +346,7 @@ public class Client {
     }
 
 
-    private String receiveMessageFromServer(int timeToWait) throws IOException {
-
+    private String receiveMessageFromServer(int timeToWait) throws IOException { // Отримання повідомлення від сервера із зазначеним таймаутом
         byte[] receiveBuffer = new byte[1024];
         DatagramPacket receivePacket = new DatagramPacket(receiveBuffer, receiveBuffer.length);
         clientSocket.setSoTimeout(timeToWait);

@@ -30,7 +30,6 @@ public class Message {
     }
 
 
-    // Getters and Setters
     public String getType() {
         return type;
     }

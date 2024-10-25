@@ -5,10 +5,7 @@ import java.net.DatagramSocket;
 public class ClientApp {
     public static void main(String[] args) {
         try {
-            BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
-            DatagramSocket clientSocket = new DatagramSocket();
-
-            Client client = new Client(clientSocket, reader);
+            Client client = new Client();
 
             client.start();
 
