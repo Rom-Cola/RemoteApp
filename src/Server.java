@@ -1,14 +1,20 @@
+import com.google.gson.Gson;
+
 import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.sql.SQLException;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.Map;
 
 public class Server {
     private static final int PORT = 12345;
     private static final String SERVER_IP = "192.168.0.100";
+    private static Gson gson = new Gson();
 
 
     private static Map<String, ClientInfo> clients = new HashMap<>();
@@ -18,7 +24,7 @@ public class Server {
         try {
             InetAddress serverAddress = InetAddress.getByName(SERVER_IP);
             serverSocket = new DatagramSocket(PORT, serverAddress);
-            System.out.println("Server started at " + SERVER_IP + ":" + PORT + ", waiting for commands...");
+            log("Server", "Server started at " + SERVER_IP + ":" + PORT + ", waiting for commands...");
 
             byte[] receiveBuffer = new byte[1024];
 
@@ -31,7 +37,7 @@ public class Server {
 
                 if (!clients.containsKey(clientKey)) {
                     clients.put(clientKey, new ClientInfo(receivePacket.getAddress(), receivePacket.getPort()));
-                    System.out.println("New client registered: " + clientKey);
+                    log("Server", "New client registered: " + clientKey);
                     DatabaseManager.saveClient(receivePacket.getAddress().toString().substring(1), receivePacket.getPort());
                 }
 
@@ -44,122 +50,130 @@ public class Server {
 
     private static void handleMessage(DatagramPacket receivePacket) throws IOException, SQLException {
         String clientMessage = new String(receivePacket.getData(), 0, receivePacket.getLength());
-        String[] parts = clientMessage.split(":", 5);
+        if(clientMessage.startsWith("RESPONSE_TO")) {
+            handleResponse(clientMessage, receivePacket.getAddress().toString(), receivePacket.getPort());
+            return;
+        }
+        Message message = gson.fromJson(clientMessage, Message.class);
 
-        String targetIP, connectionMessage, senderLogin;
-        int targetPort;
-        ClientInfo targetClient;
-        switch (parts[0]) {
+        switch (message.getType()) {
+
+            case "LOGIN":
+                if (DatabaseManager.isValidUser(message.getMessage(), message.getSecondMessage())) {
+                    sendMessage(receivePacket.getAddress(), receivePacket.getPort(), gson.toJson(new Message("LOGIN_SUCCESS")));
+                } else {
+                    sendMessage(receivePacket.getAddress(), receivePacket.getPort(), gson.toJson(new Message("LOGIN_DENIED")));
+                }
+                break;
+
+
             case "PING":
-                String responseMessage = "PONG";
-                sendMessage(receivePacket.getAddress(), receivePacket.getPort(), responseMessage);
-                System.out.println("Sent response: PONG");
+                sendMessage(receivePacket.getAddress(), receivePacket.getPort(),
+                        gson.toJson(new Message("PONG")));
+                log("Server", "Sent response PONG to %s:%d".formatted(receivePacket.getAddress().toString(), receivePacket.getPort()));
                 break;
 
             case "CONNECT_REQUEST":
-                targetIP = parts[1];
-                targetPort = Integer.parseInt(parts[2]);
-                senderLogin = parts[3];
+                String targetIP = message.getTargetIP();
+                int targetPort = message.getTargetPort();
+                String senderLogin = message.getSenderLogin();
 
-                connectionMessage = "CONNECT_REQUEST:" + receivePacket.getAddress() + ":" + receivePacket.getPort() + ":" + senderLogin;
+                String connectionMessage = gson.toJson(new Message("CONNECT_REQUEST",
+                        receivePacket.getAddress().toString(),
+                        receivePacket.getPort(),
+                        senderLogin,
+                        null));
 
-                targetClient = findClient(targetIP, targetPort);
+                ClientInfo targetClient = findClient(targetIP, targetPort);
                 if (targetClient != null) {
                     sendMessage(targetClient, connectionMessage);
-                    System.out.printf("Forwarded connect request from %s to %s:%d\n",
-                            receivePacket.getAddress() + ":" + receivePacket.getPort(), targetIP, targetPort);
+                    log("Server", "Forwarded connect request from %s:%d to %s:%d".formatted(receivePacket.getAddress().toString(), receivePacket.getPort(), targetIP, targetPort));
                 } else {
-                    System.out.printf("Target client %s:%d not found\n", targetIP, targetPort);
-                    sendMessage(receivePacket.getAddress(), receivePacket.getPort(), "NO_SUCH_USER");
+                    log("Server", "Target client %s:%d not found".formatted(targetIP, targetPort));
+                    sendMessage(receivePacket.getAddress(), receivePacket.getPort(),
+                            gson.toJson(new Message("NO_SUCH_USER")));
                 }
                 break;
+
             case "CONNECT_ACCEPTED":
-                targetIP = parts[1];
-                targetPort = Integer.parseInt(parts[2]);
+                String acceptTargetIP = message.getTargetIP().substring(1);
+                int acceptTargetPort = message.getTargetPort();
+                String acceptMessage = gson.toJson(new Message("CONNECT_ACCEPTED",
+                        receivePacket.getAddress().toString(),
+                        receivePacket.getPort(),
+                        message.getSenderLogin(),
+                        null));
 
-                connectionMessage = "CONNECT_ACCEPTED:" + receivePacket.getAddress() + ":" + receivePacket.getPort();
+                ClientInfo acceptClient = findClient(acceptTargetIP, acceptTargetPort);
+                if (acceptClient != null) {
+                    sendMessage(acceptClient, acceptMessage);
+                    log("Server", "Forwarded connect accept from %s to %s:%d"
+                            .formatted(receivePacket.getAddress() + ":" + receivePacket.getPort(), acceptTargetIP, acceptTargetPort));
 
-                targetClient = findClient(targetIP, targetPort);
-                if (targetClient != null) {
-                    sendMessage(targetClient, connectionMessage);
-                    System.out.printf("Forwarded connect accept from %s to %s:%d\n",
-                            receivePacket.getAddress() + ":" + receivePacket.getPort(), targetIP, targetPort);
                 } else {
-                    System.out.printf("Target client %s:%d not found\n", targetIP, targetPort);
+                    log("Server", "Target client %s:%d not found".formatted(acceptTargetPort, acceptTargetPort));
                 }
                 break;
+
             case "CONNECT_DENIED":
-                targetIP = parts[1];
-                targetPort = Integer.parseInt(parts[2]);
+                String denyTargetIP = message.getTargetIP();
+                int denyTargetPort = message.getTargetPort();
+                String denyMessage = gson.toJson(new Message("CONNECT_DENIED",
+                        receivePacket.getAddress().toString(),
+                        receivePacket.getPort(),
+                        message.getSenderLogin(),
+                        null));
 
-                connectionMessage = "CONNECT_DENIED:" + receivePacket.getAddress() + ":" + receivePacket.getPort();
-
-                targetClient = findClient(targetIP, targetPort);
-                if (targetClient != null) {
-                    sendMessage(targetClient, connectionMessage);
-                    System.out.printf("Forwarded connect denied from %s to %s:%d\n",
-                            receivePacket.getAddress() + ":" + receivePacket.getPort(), targetIP, targetPort);
+                ClientInfo denyClient = findClient(denyTargetIP, denyTargetPort);
+                if (denyClient != null) {
+                    sendMessage(denyClient, denyMessage);
+                    log("Server", "Forwarded connect denied from %s to %s:%d"
+                            .formatted(receivePacket.getAddress() + ":" + receivePacket.getPort(), denyTargetIP, denyTargetPort));
                 } else {
-                    System.out.printf("Target client %s:%d not found\n", targetIP, targetPort);
+                    log("Server", "Target client %s:%d not found".formatted(denyTargetIP, denyTargetPort));
                 }
                 break;
 
             case "SEND_TO":
-                String sendToTargetIP = parts[1];
-                int sendToTargetPort = Integer.parseInt(parts[2]);
-                String command = parts[3];
+                String sendToTargetIP = message.getTargetIP();
+                int sendToTargetPort = message.getTargetPort();
+                String command = message.getMessage();
 
-                String message = "EXECUTE:" + receivePacket.getAddress() + ":" + receivePacket.getPort() + ":" + command;
-                ClientInfo sendToClient = findClient(sendToTargetIP, sendToTargetPort);
-                if (sendToClient != null) {
-                    System.out.println("Sending execute to client: " + sendToClient);
-                    sendMessage(sendToClient, message);
+                String execMessage = gson.toJson(new Message("EXECUTE",
+                        receivePacket.getAddress().toString(),
+                        receivePacket.getPort(),
+                        message.getSenderLogin(),
+                        command));
+
+                ClientInfo clientToSend = findClient(sendToTargetIP, sendToTargetPort);
+                if (clientToSend != null) {
+                    log("Server", "Sending execute from %s:%d to client %s".formatted(receivePacket.getAddress().toString(), receivePacket.getPort(), clientToSend));
+                    sendMessage(clientToSend, execMessage);
                 } else {
-                    System.out.println("Target client not found.");
+                    log("Server", "Target client %s:%d not found".formatted(sendToTargetIP, sendToTargetPort));
                 }
                 break;
 
             case "RESPONSE_TO":
-                String responseToTargetIP = parts[1].substring(1);
-                int responseToTargetPort = Integer.parseInt(parts[2]);
-                String responseCommand = parts[3];
-                String response = parts[4];
-
-                ClientInfo responseToClient = findClient(responseToTargetIP, responseToTargetPort);
-                if (responseToClient != null) {
-                    System.out.println("Sending response to client: " + responseToClient);
-                    DatabaseManager.saveCommand(receivePacket.getAddress().toString().substring(1), receivePacket.getPort(),
-                            responseToTargetIP, responseToTargetPort, responseCommand, response);
-                    sendMessage(responseToClient, response);
-                } else {
-                    System.out.println("Target client not found: " + responseToTargetIP + ":" + responseToTargetPort);
-                }
-                break;
-
-            case "LOGIN":
-                String login = parts[1];
-                String password = parts[2];
-
-                if (DatabaseManager.isValidUser(login, password)) {
-                    sendMessage(receivePacket.getAddress(), receivePacket.getPort(), "LOGIN_SUCCESS");
-                } else {
-                    sendMessage(receivePacket.getAddress(), receivePacket.getPort(), "LOGIN_FAILED");
-                }
-                break;
-
-            case "REGISTER":
-                String registerLogin = parts[1];
-                String registerPassword = parts[2];
-
-                if (DatabaseManager.registerUser(registerLogin, registerPassword)) {
-                    sendMessage(receivePacket.getAddress(), receivePacket.getPort(), "REGISTER_SUCCESS");
-                } else {
-                    sendMessage(receivePacket.getAddress(), receivePacket.getPort(), "REGISTER_FAILED");
-                }
-                break;
+//                String responseToTargetIP = message.getTargetIP();
+//                int responseToTargetPort = message.getTargetPort();
+//                String responseCommand = message.getMessage();
+//                String response = message.getMessage();
+//
+//                ClientInfo responseToClient = findClient(responseToTargetIP, responseToTargetPort);
+//                if (responseToClient != null) {
+//                    System.out.println("Sending response to client: " + responseToClient);
+//                    // Зберігаємо результат виконання команди в базі даних
+//                    DatabaseManager.saveCommand(receivePacket.getAddress().toString(), receivePacket.getPort(), responseToTargetIP, responseToTargetPort, responseCommand, response);
+//                    sendMessage(responseToClient, response);
+//                } else {
+//                    System.out.println("Target client for response not found.");
+//                }
+//                break;
 
             default:
-                System.out.printf("Command \"%s\" not found\n", clientMessage);
+                log("Server", "Unknown message type %s from %s:%d: ".formatted(message.getType(), receivePacket.getAddress().toString(), receivePacket.getPort()));
+                System.out.println();
                 break;
         }
     }
@@ -170,11 +184,28 @@ public class Server {
         for (String key : clients.keySet()) {
             ClientInfo clientInfo = clients.get(key);
             if (clientInfo.getAddress().toString().equals(ip) && clientInfo.getPort() == port) {
-                System.out.printf("Found: %s:%d\n", clientInfo.getAddress(), clientInfo.getPort());
                 return clientInfo;
             }
         }
         return null;
+    }
+
+    private static void handleResponse(String message, String senderIP, int senderPort) throws SQLException, IOException {
+        String[] parts = message.split(":", 5);
+        String targetIP = parts[1];
+        int targetPort = Integer.parseInt(parts[2]);
+        String responseCommand = parts[3];
+        String response = parts[4];
+
+        ClientInfo clientToResponse = findClient(targetIP, targetPort);
+        if (clientToResponse != null) {
+            log("Server", "Sending response from %s:%d to client %s".formatted(targetIP, targetPort, clientToResponse));
+            DatabaseManager.saveCommand(senderIP.substring(1), senderPort,
+                    targetIP, targetPort, responseCommand, response);
+            sendMessage(clientToResponse, response);
+        } else {
+            log("Server", "Target client %s:%d not found".formatted(targetIP, targetPort));
+        }
     }
 
     private static void sendMessage(ClientInfo clientInfo, String message) throws IOException {
@@ -189,6 +220,13 @@ public class Server {
         DatagramPacket sendPacket = new DatagramPacket(sendBuffer, sendBuffer.length,
                 inetAddress, port);
         serverSocket.send(sendPacket);
+    }
+    private static void log(String speaker, String message) {
+        LocalDateTime currentDateTime = LocalDateTime.now();
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+        String formattedDateTime = "[" + currentDateTime.format(formatter) + "]";
+        System.out.print(formattedDateTime);
+        System.out.printf(" %s: %s\n", speaker, message);
     }
 }
 
@@ -211,6 +249,6 @@ class ClientInfo {
 
     @Override
     public String toString() {
-        return "Client:" + address + ":" + port;
+        return address.toString().substring(1) + ":" + port;
     }
 }
